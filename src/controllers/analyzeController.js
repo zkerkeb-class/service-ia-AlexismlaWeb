@@ -3,31 +3,40 @@ const router = express.Router();
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
+const sharp = require("sharp");
 const { OpenAI } = require("openai");
 const ImageKit = require("imagekit");
+const Replicate = require("replicate");
 const axios = require("axios");
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+require("dotenv").config();
 
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
 const imagekit = new ImageKit({
   publicKey: process.env.IMAGEKIT_PUBLIC_KEY,
   privateKey: process.env.IMAGEKIT_PRIVATE_KEY,
   urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT,
 });
 
+const ALLOWED_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp"];
+
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, "uploads/");
+  destination: (req, file, cb) => cb(null, "uploads/"),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!ALLOWED_EXTENSIONS.includes(ext)) {
+      return cb(new Error("Format de fichier non autorisé"));
+    }
+    cb(null, Date.now() + ext);
   },
-  filename: function (req, file, cb) {
-    cb(null, Date.now() + path.extname(file.originalname));
-  }
 });
-const upload = multer({ storage: storage });
+
+const upload = multer({ storage });
 
 router.post("/", upload.single("image"), async (req, res) => {
   const imagePath = req.file.path;
-  const originalName = req.file.originalname;
+  const originalName = path.parse(req.file.originalname).name;
   const userId = req.body.userId;
 
   if (!userId) {
@@ -35,67 +44,98 @@ router.post("/", upload.single("image"), async (req, res) => {
   }
 
   try {
-    // Upload image sur ImageKit
-    const imageBuffer = fs.readFileSync(imagePath);
+    // 1. Compresser et convertir l'image
+    const compressedBuffer = await sharp(imagePath)
+      .resize({ width: 1024 })
+      .jpeg({ quality: 80 })
+      .toBuffer();
+
+    // 2. Upload image compressée sur ImageKit
     const uploadResponse = await imagekit.upload({
-      file: imageBuffer,
-      fileName: originalName,
+      file: compressedBuffer,
+      fileName: originalName + ".jpg",
       folder: "/dressing/"
     });
     const uploadedImageUrl = uploadResponse.url;
+    const uploadedFileId = uploadResponse.fileId;
 
-    // Upload fichier à OpenAI
+    console.log("✅ Image optimisée uploadée :", uploadedImageUrl);
+
+    // 3. Supprimer fichier local
+    if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
+
+    // 4. Retirer fond via Replicate
+    const replicateResponse = await replicate.run(
+      "851-labs/background-remover:a029dff38972b5fda4ec5d75d7d1cd25aeff621d2cf4946a41055d7db66b80bc",
+      { input: { image: uploadedImageUrl } }
+    );
+    const cleanedImageUrl = replicateResponse;
+
+    if (!cleanedImageUrl) {
+      throw new Error("Erreur de suppression du fond");
+    }
+
+    console.log("✅ Image fond blanc créée :", cleanedImageUrl);
+
+    // 5. Télécharger image nettoyée et uploader sur ImageKit
+    const finalImageBuffer = (await axios.get(cleanedImageUrl, { responseType: "arraybuffer" })).data;
+
+    await imagekit.deleteFile(uploadedFileId); // Supprimer l'ancienne image
+    console.log("🗑️ Image brute supprimée");
+
+    const finalUpload = await imagekit.upload({
+      file: finalImageBuffer,
+      fileName: "cleaned-" + originalName + ".jpg",
+      folder: "/dressing/",
+    });
+    const finalImageUrl = finalUpload.url;
+    console.log("✅ Image finale uploadée :", finalImageUrl);
+
+    // 6. Envoi à OpenAI pour analyse
     const fileUpload = await openai.files.create({
-      file: fs.createReadStream(imagePath),
+      file: Buffer.from(finalImageBuffer),
       purpose: "assistants",
     });
 
-    // Créer un thread
     const thread = await openai.beta.threads.create();
-
-    // Ajouter le message avec l'image
     await openai.beta.threads.messages.create(thread.id, {
       role: "user",
       content: [
         {
           type: "text",
           text: `
-          Analyse cette image et retourne UNIQUEMENT un tableau JSON :
+          Analyse cette image et retourne uniquement ce format JSON :
+
           [
             {
               "type": "t-shirt",
               "color": "noir",
-              "style": "streetwear",
+              "style": "casual",
               "brand": "nike",
-              "suggestedBrands": ["nike", "adidas", "puma"]
+              "suggestedBrands": ["nike", "adidas", "puma"],
+              "season": "summer"
             }
           ]
-          Aucun texte ou explication, que du JSON propre.
           `,
         },
         {
           type: "image_file",
           image_file: { file_id: fileUpload.id },
-        },
+        }
       ],
     });
 
-    // Lancer l'assistant
     const run = await openai.beta.threads.runs.create(thread.id, {
       assistant_id: process.env.OPENAI_ASSISTANT_ID,
     });
 
-    // Attendre que le traitement soit terminé
     let completedRun;
     while (true) {
       completedRun = await openai.beta.threads.runs.retrieve(thread.id, run.id);
-      if (completedRun.status === "completed") {
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      if (completedRun.status === "completed") break;
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
-    // Récupérer la réponse
     const messages = await openai.beta.threads.messages.list(thread.id);
     const gptResponse = messages.data[0].content[0].text.value.trim();
     console.log("Réponse GPT brute:", gptResponse);
@@ -112,7 +152,7 @@ router.post("/", upload.single("image"), async (req, res) => {
       }
     }
 
-    // Sauvegarder chaque vêtement en BDD
+    // 7. Sauvegarder dans ta BDD
     const results = [];
 
     for (const clothing of clothesArray) {
@@ -124,26 +164,20 @@ router.post("/", upload.single("image"), async (req, res) => {
           style: clothing.style,
           brand: clothing.brand,
           suggestedBrands: clothing.suggestedBrands.join(", "),
-          imageUrl: uploadedImageUrl,
-          season: "all" // ➔ ajouter cette ligne 🚀
+          imageUrl: finalImageUrl,
+          season: clothing.season || "all",
         });
-          
         results.push(saveResponse.data);
       } catch (error) {
         console.error("Erreur enregistrement vêtement :", error.response?.data || error.message);
       }
     }
 
-    // ✅ ENFIN ici la réponse finale propre
     res.status(201).json({ message: "Vêtements analysés et enregistrés", clothes: results });
 
   } catch (error) {
     console.error("Erreur analyse IA:", error);
     res.status(500).json({ error: "Échec d’analyse", details: error.message });
-  } finally {
-    if (fs.existsSync(imagePath)) {
-      fs.unlinkSync(imagePath);
-    }
   }
 });
 
