@@ -1,0 +1,63 @@
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Logs
+logs/
+*.log
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Environnements
+.env
+.env.local
+.env.*.local
+
+# Build output
+dist/
+build/
+
+# IDEs
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# Dependency directories
+bower_components/
+
+# Test coverage
+coverage/
+
+# Misc
+*.tgz
+*.tar.gz
+
+# TypeScript
+*.tsbuildinfo
+
+# Python (si jamais ton projet en utilise)
+__pycache__/
+*.py[cod]
+*.pyo
+
+# PHP
+vendor/
+
+# Next.js
+.next/
+
+# React Native
+.expo/
+.expo-shared/
+
+# Flutter
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/

@@ -1,0 +1,36 @@
+{
+  "name": "service-ia-alexismlaweb",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zkerkeb-class/service-ia-AlexismlaWeb.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/zkerkeb-class/service-ia-AlexismlaWeb/issues"
+  },
+  "homepage": "https://github.com/zkerkeb-class/service-ia-AlexismlaWeb#readme",
+  "dependencies": {
+    "axios": "^1.8.4",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "imagekit": "^6.0.0",
+    "multer": "^1.4.5-lts.2",
+    "openai": "^4.95.1",
+    "replicate": "^1.0.1",
+    "sharp": "^0.34.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.1",
+    "@types/multer": "^1.4.12",
+    "nodemon": "^3.1.9"
+  }
+}
