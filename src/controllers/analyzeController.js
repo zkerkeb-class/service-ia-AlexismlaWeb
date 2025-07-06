@@ -120,7 +120,7 @@ router.post("/", upload.single("image"), async (req, res) => {
     const results = [];
     for (const clothing of clothesArray) {
       try {
-        const saveResponse = await axios.post("http://192.168.1.42:4001/api/clothing", {
+        const saveResponse = await axios.post("http://localhost:4001/api/clothing", {
           userId: req.body.userId,
           type: clothing.type,
           color: clothing.color,

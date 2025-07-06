@@ -6,6 +6,8 @@ require("dotenv").config();
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+const DB_SERVICE_URL = process.env.DB_SERVICE_URL || "http://localhost:4001";
+
 // POST /api/recommendation
 router.post("/", async (req, res) => {
   const { userId, style, weather } = req.body;
@@ -16,21 +18,44 @@ router.post("/", async (req, res) => {
   }
 
   try {
-    // 🔐 Debug : vérifier si le token est bien reçu
-    console.log("🔐 Auth header reçu:", token);
+    // 🔐 Vérification de l'utilisateur dans DB service
+    const userRes = await axios.get(`${DB_SERVICE_URL}/api/users/${userId}`);
+    const user = userRes.data;
 
-    // ✅ Récupérer le dressing de l'utilisateur avec le token
+    // ⏱ Vérifie s’il faut recharger un token gratuit
+    const now = new Date();
+    const lastReset = new Date(user.lastTokenReset);
+    const daysSinceReset = (now - lastReset) / (1000 * 60 * 60 * 24);
+
+    if (user.aiTokens === 0 && daysSinceReset >= 7) {
+      await axios.put(`${DB_SERVICE_URL}/api/users/${userId}/reset-tokens`, {
+        aiTokens: 1,
+        lastTokenReset: now.toISOString(),
+      });
+      user.aiTokens = 1;
+    }
+
+    // 🚫 Bloque si plus de tokens
+    if (user.aiTokens <= 0 && !user.isPremium) {
+      return res.status(403).json({
+        error: "Plus de crédits IA disponibles. Revenez plus tard ou achetez un pack.",
+      });
+    }
+
+    // 🔽 Décrémente le token
+    await axios.put(`${DB_SERVICE_URL}/api/users/${userId}/consume-token`);
+
+    // ✅ Récupère les vêtements
     const clothingResponse = await axios.get(
-      `http://192.168.1.42:4001/api/clothing?userId=${userId}`,
+      `${DB_SERVICE_URL}/api/clothing?userId=${userId}`,
       {
         headers: {
-          Authorization: token, // Transmet le token vers clothing API
+          Authorization: token,
         },
       }
     );
 
     const clothingItems = clothingResponse.data;
-
     if (!Array.isArray(clothingItems) || clothingItems.length === 0) {
       return res.status(404).json({ error: "Aucun vêtement trouvé pour cet utilisateur." });
     }
@@ -83,7 +108,7 @@ Ne fournis rien d'autre que cet objet JSON.
     }
 
   } catch (error) {
-    console.error("❌ Erreur recommandation :", error);
+    console.error("❌ Erreur recommandation :", error.response?.data || error);
     return res.status(500).json({ error: "Erreur interne", details: error.message });
   }
 });
