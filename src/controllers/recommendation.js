@@ -18,11 +18,9 @@ router.post("/", async (req, res) => {
   }
 
   try {
-    // 🔐 Vérification de l'utilisateur dans DB service
     const userRes = await axios.get(`${DB_SERVICE_URL}/api/users/${userId}`);
     const user = userRes.data;
 
-    // ⏱ Vérifie s’il faut recharger un token gratuit
     const now = new Date();
     const lastReset = new Date(user.lastTokenReset);
     const daysSinceReset = (now - lastReset) / (1000 * 60 * 60 * 24);
@@ -35,11 +33,14 @@ router.post("/", async (req, res) => {
       user.aiTokens = 1;
     }
 
-    // 🚫 Bloque si plus de tokens
     if (user.aiTokens <= 0 && !user.isPremium) {
-      return res.status(403).json({
+      return res.json({
+        success: false,
         error: "Plus de crédits IA disponibles. Revenez plus tard ou achetez un pack.",
+        recommendation: null,
+        selectedItemIds: [],
       });
+      
     }
 
     // 🔽 Décrémente le token
