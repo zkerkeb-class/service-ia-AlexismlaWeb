@@ -13,18 +13,31 @@ router.post("/", async (req, res) => {
   const { userId, style, weather } = req.body;
   const token = req.headers.authorization;
 
-  if (!userId || !style || !weather?.condition || !weather?.temperature) {
-    return res.status(400).json({ error: "Champs requis : userId, style, weather.condition, weather.temperature" });
+  if (!userId || !weather?.condition || !weather?.temperature) {
+    return res.status(400).json({ error: "Champs requis : userId, weather.condition, weather.temperature" });
   }
 
   try {
+    // Récupère l'utilisateur enrichi
     const userRes = await axios.get(`${DB_SERVICE_URL}/api/users/${userId}`);
     const user = userRes.data;
 
+    // Récupère les préférences utilisateur
+    let preferences = null;
+    try {
+      const prefRes = await axios.get(`${DB_SERVICE_URL}/api/preferences`, {
+        headers: { Authorization: token },
+      });
+      preferences = prefRes.data;
+    } catch (e) {
+      // Pas de préférences trouvées, ce n'est pas bloquant
+      preferences = null;
+    }
+
+    // Gestion des tokens IA (inchangé)
     const now = new Date();
     const lastReset = new Date(user.lastTokenReset);
     const daysSinceReset = (now - lastReset) / (1000 * 60 * 60 * 24);
-
     if (user.aiTokens === 0 && daysSinceReset >= 7) {
       await axios.put(`${DB_SERVICE_URL}/api/users/${userId}/reset-tokens`, {
         aiTokens: 1,
@@ -32,7 +45,6 @@ router.post("/", async (req, res) => {
       });
       user.aiTokens = 1;
     }
-
     if (user.aiTokens <= 0 && !user.isPremium) {
       return res.json({
         success: false,
@@ -40,33 +52,35 @@ router.post("/", async (req, res) => {
         recommendation: null,
         selectedItemIds: [],
       });
-      
     }
-
-    // 🔽 Décrémente le token
     await axios.put(`${DB_SERVICE_URL}/api/users/${userId}/consume-token`);
 
-    // ✅ Récupère les vêtements
+    // Récupère les vêtements
     const clothingResponse = await axios.get(
       `${DB_SERVICE_URL}/api/clothing?userId=${userId}`,
-      {
-        headers: {
-          Authorization: token,
-        },
-      }
+      { headers: { Authorization: token } }
     );
-
     const clothingItems = clothingResponse.data;
     if (!Array.isArray(clothingItems) || clothingItems.length === 0) {
       return res.status(404).json({ error: "Aucun vêtement trouvé pour cet utilisateur." });
     }
-
     const formattedInventory = clothingItems.map(item =>
       `ID: ${item.id}, Type: ${item.type}, Marque: ${item.brand}, Couleur: ${item.color}, Style: ${item.style || "N/A"}, Saison: ${item.season || "N/A"}`
     ).join("\n");
 
+    // Génération du prompt enrichi
     const prompt = `
-Voici une liste de vêtements avec leurs identifiants. En fonction de la météo et du style préféré, sélectionne une tenue cohérente.
+Voici le profil utilisateur :
+- Genre : ${user.genre || "non renseigné"}
+- Âge : ${user.age || "non renseigné"}
+- Taille : ${user.taille ? user.taille + " cm" : "non renseigné"}
+- Poids : ${user.poids ? user.poids + " kg" : "non renseigné"}
+- Morphologie : ${user.morphologie || "non renseigné"}
+- Styles préférés : ${(user.stylesPreferes || []).join(", ") || "non renseigné"}
+- Couleurs/motifs favoris : ${(user.couleursMotifs || []).join(", ") || "non renseigné"}
+- Restrictions (matières, vêtements à éviter) : ${user.restrictions || "aucune"}
+- Ville : ${user.ville || "non renseigné"}
+${preferences ? `- Préférences :\n  - Couleurs favorites : ${(preferences.favoriteColors || []).join(", ")}\n  - Couleurs à éviter : ${(preferences.avoidColors || []).join(", ")}\n  - Styles favoris : ${(preferences.favoriteStyles || []).join(", ")}\n  - Types à éviter : ${(preferences.avoidTypes || []).join(", ")}` : ""}
 
 # Inventaire du Dressing :
 ${formattedInventory}
@@ -75,8 +89,8 @@ ${formattedInventory}
 Condition : ${weather.condition}
 Température : ${weather.temperature}°C
 
-# Style du Client :
-${style}
+Ta mission :
+Propose une tenue complète adaptée à ce profil et à la météo, sans jamais inclure deux vêtements de la même catégorie (ex : pas deux pantalons). Pour chaque vêtement, précise la catégorie, la couleur/motif, et explique brièvement pourquoi ce choix est pertinent pour l’utilisateur et la météo.
 
 # Format attendu (en JSON) :
 {
@@ -101,7 +115,15 @@ Ne fournis rien d'autre que cet objet JSON.
       if (!parsed.recommendation || !Array.isArray(parsed.selectedItemIds)) {
         throw new Error("Format de réponse invalide");
       }
-
+      // Vérification : pas deux vêtements de la même catégorie
+      const selectedItems = clothingItems.filter(item => parsed.selectedItemIds.includes(item.id));
+      const categories = new Set();
+      for (const item of selectedItems) {
+        if (categories.has(item.type)) {
+          return res.status(400).json({ error: "La tenue contient deux vêtements de la même catégorie." });
+        }
+        categories.add(item.type);
+      }
       return res.status(200).json(parsed);
     } catch (err) {
       console.error("❌ JSON invalide depuis OpenAI:", aiResponse);
