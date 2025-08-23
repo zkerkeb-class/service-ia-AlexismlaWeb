@@ -1,3 +1,5 @@
+const path = require('path');
+
 /**
  * Input sanitization utilities for IA service
  */
@@ -31,22 +33,28 @@ function sanitizeFilename(filename) {
     return null;
   }
 
-  // Use path to extract extension and name
-  const ext = path.extname(filename);
-  const base = path.basename(filename, ext);
-  const sanitizedBase = sanitize(base);
-  const sanitizedExt = sanitize(ext);
-
+  // First sanitize the entire filename to remove path traversal
+  const sanitizedFullName = sanitize(filename);
+  
+  // Use path to extract extension and name from the sanitized filename
+  const ext = path.extname(sanitizedFullName);
+  const base = path.basename(sanitizedFullName, ext);
+  
   // Check if filename is valid after sanitization
-  if (!sanitizedBase || sanitizedBase.length === 0) {
+  if (!base || base.length === 0) {
     return null;
   }
 
   // Add timestamp to ensure uniqueness
   const timestamp = Date.now();
-  const finalExt = sanitizedExt && sanitizedExt.length > 0 ? sanitizedExt : '.txt';
-
-  return `${sanitizedBase}_${timestamp}${finalExt}`;
+  
+  // If there's an extension, append timestamp after the extension
+  // If no extension, add .txt extension before timestamp
+  if (ext && ext.length > 0) {
+    return `${base}${ext}_${timestamp}`;
+  } else {
+    return `${base}_${timestamp}.txt`;
+  }
 }
 
 /**
