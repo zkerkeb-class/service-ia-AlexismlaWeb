@@ -31,18 +31,22 @@ function sanitizeFilename(filename) {
     return null;
   }
 
-  const sanitized = sanitize(filename);
-  
+  // Use path to extract extension and name
+  const ext = path.extname(filename);
+  const base = path.basename(filename, ext);
+  const sanitizedBase = sanitize(base);
+  const sanitizedExt = sanitize(ext);
+
   // Check if filename is valid after sanitization
-  if (!sanitized || sanitized.length === 0) {
+  if (!sanitizedBase || sanitizedBase.length === 0) {
     return null;
   }
 
   // Add timestamp to ensure uniqueness
   const timestamp = Date.now();
-  const extension = sanitized.includes('.') ? '' : '.txt';
-  
-  return `${sanitized}_${timestamp}${extension}`;
+  const finalExt = sanitizedExt && sanitizedExt.length > 0 ? sanitizedExt : '.txt';
+
+  return `${sanitizedBase}_${timestamp}${finalExt}`;
 }
 
 /**
