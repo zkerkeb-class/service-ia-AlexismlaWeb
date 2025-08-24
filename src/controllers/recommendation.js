@@ -6,7 +6,7 @@ require("dotenv").config();
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const DB_SERVICE_URL = process.env.DB_SERVICE_URL || "http://localhost:4001";
+const DB_SERVICE_URL = "http://bdd-service:4001";
 
 // POST /api/recommendation
 router.post("/", async (req, res) => {
@@ -90,12 +90,12 @@ Condition : ${weather.condition}
 Température : ${weather.temperature}°C
 
 Ta mission :
-Propose une tenue complète adaptée à ce profil et à la météo, sans jamais inclure deux vêtements de la même catégorie (ex : pas deux pantalons). Pour chaque vêtement, précise la catégorie, la couleur/motif, et explique brièvement pourquoi ce choix est pertinent pour l’utilisateur et la météo.
+Propose une tenue complète adaptée à ce profil et à la météo, sans jamais inclure deux vêtements de la même catégorie (ex : pas deux pantalons). Sélectionne 3 à 4 vêtements maximum. Pour chaque vêtement, précise la catégorie, la couleur/motif, et explique brièvement pourquoi ce choix est pertinent pour l’utilisateur et la météo.
 
 # Format attendu (en JSON) :
 {
   "recommendation": "Description de la tenue et justification",
-  "selectedItemIds": ["id1", "id2", "id3"]
+  "selectedItemIds": ["id1", "id2", "id3", "id4"]
 }
 
 Ne fournis rien d'autre que cet objet JSON.
